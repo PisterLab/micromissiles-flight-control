@@ -28,27 +28,16 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 typedef enum {
-  SENSOR_CONFIG0 = 0x03,
-  FIFO_CONFIG = 0x16,
-  FIFO_COUNTH = 0x2E,
-  FIFO_COUNTL = 0x2F,
-  FIFO_DATA = 0x30,
-  FIFO_CONFIG1 = 0x5F,
-  FIFO_CONFIG2 = 0x60,
-  FIFO_CONFIG3 = 0x61,
-  WHO_AM_I = 0x75,
-} spi_register_e;
-
-typedef enum {
-  BYPASS = 0,
-  STREAM_TO_FIFO = 1,
-  STOP_ON_FULL = 2,
-} fifo_mode_e;
-
-typedef enum {
-  BANK_1 = 0x08000000,
-  BANK_2 = 0x08040000,
-} flash_memory_address_e;
+  REGISTER_SENSOR_CONFIG0 = 0x03,
+  REGISTER_FIFO_CONFIG = 0x16,
+  REGISTER_FIFO_COUNTH = 0x2E,
+  REGISTER_FIFO_COUNTL = 0x2F,
+  REGISTER_FIFO_DATA = 0x30,
+  REGISTER_FIFO_CONFIG1 = 0x5F,
+  REGISTER_FIFO_CONFIG2 = 0x60,
+  REGISTER_FIFO_CONFIG3 = 0x61,
+  REGISTER_WHO_AM_I = 0x75,
+} imu_register_e;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -58,8 +47,7 @@ typedef enum {
 #define IMU_PACKET_SIZE 16
 #define IMU_SPI_PACKET_SIZE (IMU_PACKET_SIZE + 1)
 #define IMU_DEFAULT_WHO_AM_I 0x42
-#define FLASH_BANK_SIZE (256 * 1024)
-#define FLASH_SIZE (2 * FLASH_BANK_SIZE)
+#define IMU_FLASH_SIZE (126 * 1024)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -78,6 +66,9 @@ TIM_HandleTypeDef htim1;
 uint8_t g_spi_tx_buffer[SPI_MAX_PACKET_SIZE];
 uint8_t g_spi_rx_buffer[SPI_MAX_PACKET_SIZE];
 uint8_t g_imu_buffer[IMU_PACKET_SIZE];
+
+uint8_t g_imu_flash_buffer[IMU_FLASH_SIZE] __attribute__((section(".imu")));
+size_t g_imu_flash_num_bytes_written = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -102,6 +93,42 @@ static void led_error_on(void) {
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void spi_write(imu_register_e address, uint8_t data) {
+  g_spi_tx_buffer[0] = address & 0x7F;
+  g_spi_tx_buffer[1] = data;
+  HAL_SPI_Transmit(&hspi1, g_spi_tx_buffer, 2, SPI_TIMEOUT);
+}
+
+static void spi_read(imu_register_e address, size_t length) {
+  if (length > SPI_MAX_PACKET_SIZE) {
+    return;
+  }
+  g_spi_tx_buffer[0] = address | 0x80;
+  HAL_SPI_TransmitReceive(&hspi1, g_spi_tx_buffer, g_spi_rx_buffer, length, SPI_TIMEOUT);
+}
+
+static void imu_read(void) {
+  spi_read(REGISTER_FIFO_DATA, IMU_SPI_PACKET_SIZE);
+  // Ignore the SPI address byte.
+  memcpy(g_imu_buffer, g_spi_rx_buffer + 1, IMU_PACKET_SIZE);
+}
+
+static void imu_init(void) {
+  // Enable stream-to-FIFO mode.
+  spi_write(REGISTER_FIFO_CONFIG, 1 << 6);
+  // Enable temperature, gyroscope, and accelomerater data.
+  spi_write(REGISTER_FIFO_CONFIG1, 0x07);
+}
+
+static void imu_verify(void) {
+  spi_read(REGISTER_WHO_AM_I, /*length=*/1);
+  if (g_spi_rx_buffer[0] == IMU_DEFAULT_WHO_AM_I) {
+      led_success_on();
+  } else {
+      led_error_on();
+  }
+}
+
 void TIM1_UP_TIM16_IRQHandler(void) {
   HAL_TIM_IRQHandler(&htim1);
 }
@@ -111,46 +138,15 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     led_activity_toggle();
     if (hspi1.State == HAL_SPI_STATE_READY) {
         imu_read();
-        // Data should be in g_imu_buffer now.
+        // Copy the IMU data into flash memory.
+        if (g_imu_flash_num_bytes_written < IMU_FLASH_SIZE) {
+          HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, (uint32_t)(g_imu_flash_buffer + g_imu_flash_num_bytes_written), *((uint64_t*)g_imu_buffer));
+          HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, (uint32_t)(g_imu_flash_buffer + g_imu_flash_num_bytes_written + sizeof(uint64_t)), *((uint64_t*)(g_imu_buffer + sizeof(uint64_t))));
+          g_imu_flash_num_bytes_written += IMU_PACKET_SIZE;
+        }
     } else {
         led_error_on();
     }
-  }
-}
-
-static void spi_write(spi_register_e address, uint8_t data) {
-  g_spi_tx_buffer[0] = address & 0x7F;
-  g_spi_tx_buffer[1] = data;
-  HAL_SPI_Transmit(&hspi1, g_spi_tx_buffer, 2, SPI_TIMEOUT);
-}
-
-static void spi_read(spi_register_e address, size_t length) {
-  if (length > SPI_MAX_PACKET_SIZE) {
-    return;
-  }
-  g_spi_tx_buffer[0] = address | 0x80;
-  HAL_SPI_TransmitReceive(&hspi1, g_spi_tx_buffer, g_spi_rx_buffer, length, SPI_TIMEOUT);
-}
-
-static void imu_read(void) {
-  spi_read(FIFO_DATA, IMU_SPI_PACKET_SIZE);
-  // Ignore the SPI address byte.
-  memcpy(g_imu_buffer, g_spi_rx_buffer + 1, IMU_PACKET_SIZE);
-}
-
-static void imu_init(void) {
-  // Enable stream-to-FIFO mode.
-  spi_write(FIFO_CONFIG, 1 << 6);
-  // Enable temperature, gyroscope, and accelomerater data.
-  spi_write(FIFO_CONFIG1, 0x07);
-}
-
-static void imu_verify(void) {
-  spi_read(WHO_AM_I, /*length=*/1);
-  if (g_spi_rx_buffer[0] == IMU_DEFAULT_WHO_AM_I) {
-      led_success_on();
-  } else {
-      led_error_on();
   }
 }
 /* USER CODE END 0 */
@@ -190,7 +186,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   HAL_NVIC_EnableIRQ(TIM1_UP_TIM16_IRQn);
   imu_init();
-  imu_verify_connection();
+  imu_verify();
   HAL_TIM_Base_Start_IT(&htim1);
   /* USER CODE END 2 */
 

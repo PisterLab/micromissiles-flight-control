@@ -131,6 +131,14 @@ SECTIONS
     . = ALIGN(4);
   } >FLASH
 
+  /* IMU data */
+  .imu 0x08060000 :
+  {
+    . = ALIGN(4);
+    KEEP (*(.imu*))
+    . = ALIGN(4);
+  } >FLASH
+
   /* Used by the startup to initialize data */
   _sidata = LOADADDR(.data);
 
