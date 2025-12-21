@@ -1,2 +1,23 @@
+# STM32CubeIDE.
+.metadata
+.settings/
+Debug/
+Release/
+*.launch
+.mxproject
+*.su
+*.d
+
+# Build.
+*.o
+*.elf
+*.map
+*.lib
+*.a
+*.exe
+
 # Mac.
 .DS_Store
+
+# Development.
+.vscode/
