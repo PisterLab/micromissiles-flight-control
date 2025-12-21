@@ -58,6 +58,7 @@
 extern DMA_HandleTypeDef hdma_spi1_tx;
 extern DMA_HandleTypeDef hdma_spi1_rx;
 /* USER CODE BEGIN EV */
+extern TIM_HandleTypeDef htim1;
 
 /* USER CODE END EV */
 

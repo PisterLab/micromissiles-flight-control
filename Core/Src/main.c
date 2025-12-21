@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdint.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,7 +52,9 @@ typedef enum {
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
+#define LED_SUCCESS_ON() HAL_GPIO_WritePin(GPIOB, LED1_SIG_Pin, GPIO_PIN_SET)
+#define LED_ACTIVITY_TOGGLE() HAL_GPIO_TogglePin(GPIOB, LED2_SIG_Pin)
+#define LED_ERROR_ON() HAL_GPIO_WritePin(GPIOA, LED3_SIG_Pin, GPIO_PIN_SET)
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -62,7 +65,9 @@ DMA_HandleTypeDef hdma_spi1_rx;
 TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN PV */
-
+#define BUFFER_SIZE 17
+uint8_t aTxBuffer[BUFFER_SIZE];
+uint8_t aRxBuffer[BUFFER_SIZE];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -77,34 +82,77 @@ static void MX_TIM1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+//void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+//  if (htim->Instance == TIM1) {
+//	  if (hspi1.State == HAL_SPI_STATE_READY) {
+//		  HAL_SPI_TransmitReceive_DMA(&hspi1, aTxBuffer, aRxBuffer, BUFFER_SIZE);
+//	  }
+//  }
+//}
+void TIM1_UP_TIM16_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM1_UP_TIM16_IRQn 0 */
+
+  /* USER CODE END TIM1_UP_TIM16_IRQn 0 */
+
+  // This function clears the interrupt flag and calls your PeriodElapsedCallback
+  HAL_TIM_IRQHandler(&htim1);
+
+  /* USER CODE BEGIN TIM1_UP_TIM16_IRQn 1 */
+
+  /* USER CODE END TIM1_UP_TIM16_IRQn 1 */
+}
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
   if (htim->Instance == TIM1) {
-    HAL_SPI_TransmitReceive_DMA(&hspi1, aTxBuffer, aRxBuffer, BUFFER_SIZE);
+    LED_ACTIVITY_TOGGLE();
+    if (hspi1.State == HAL_SPI_STATE_READY) {
+        HAL_SPI_TransmitReceive_DMA(&hspi1, aTxBuffer, aRxBuffer, BUFFER_SIZE);
+    } else {
+        LED_ERROR_ON();
+    }
   }
 }
 
 static void imu_write(uint8_t address, uint8_t data) {
   uint8_t write_address = address & 0x7F;
   uint8_t write_buffer[2] = {write_address, data};
-  HAL_SPI_Transmit_DMA(&hspi1, write_buffer, sizeof(uint8_t) * 2);
+  HAL_SPI_Transmit(&hspi1, write_buffer, 2, 10);
+//  HAL_SPI_Transmit_DMA(&hspi1, write_buffer, sizeof(uint8_t) * 2);
 }
 
 static void imu_read(uint8_t address, uint8_t* buffer) {
   uint8_t read_address = 0x80 | address;
-  uint8_t write_buffer[17];
+  uint8_t write_buffer[17] = {0}; //  uint8_t write_buffer[17];
   write_buffer[0] = read_address;
-  uint8_t read_buffer[17];
-  memset(read_buffer, 0, sizeof(uint8_t) * 17);
-  HAL_SPI_TransmitReceive_DMA(&hspi1, write_buffer, read_buffer, sizeof(uint8_t) * 17);
+  uint8_t read_buffer[17] = {0}; //  uint8_t read_buffer[17];
+//  memset(read_buffer, 0, sizeof(uint8_t) * 17);
+//  HAL_SPI_TransmitReceive_DMA(&hspi1, write_buffer, read_buffer, sizeof(uint8_t) * 17);
+  HAL_SPI_TransmitReceive(&hspi1, write_buffer, read_buffer, 17, 10);
   // Ignore the SPI address byte.
-  memcpy(buffer, read_buffer + 1, sizeof(uint8_t) * 16);
+  memcpy(buffer, read_buffer + 1, 16); //  memcpy(buffer, read_buffer + 1, sizeof(uint8_t) * 16);
 }
 
 static void imu_init() {
   // Enable stream-to-FIFO mode.
+  aTxBuffer[0] = 0x80 | 0x30;
   imu_write(FIFO_CONFIG, 1 << 6);
   // Enable temperature, gyroscope, and accelomerater data.
   imu_write(FIFO_CONFIG1, 0x07);
+}
+
+static void imu_verify_connection() {
+  uint8_t who_am_i_reg = 0x0F;
+  uint8_t temp_buffer[16] = {0};
+//  uint8_t device_id = 0;
+
+  imu_read(who_am_i_reg, temp_buffer);
+
+  if (temp_buffer[0] == 0x69) {
+      LED_SUCCESS_ON(); // LED1 turns SOLID to indicate hardware link is good
+  } else {
+      LED_ERROR_ON();   // LED3 turns SOLID to indicate verification failed
+  }
 }
 /* USER CODE END 0 */
 
@@ -130,7 +178,7 @@ int main(void)
 
   /* Configure the system clock */
   SystemClock_Config();
-
+  __HAL_RCC_TIM1_CLK_ENABLE();
   /* USER CODE BEGIN SysInit */
 
   /* USER CODE END SysInit */
@@ -141,8 +189,10 @@ int main(void)
   MX_SPI1_Init();
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_Base_Start(&htim1);
+  HAL_NVIC_EnableIRQ(TIM1_UP_TIM16_IRQn);
   imu_init();
+  imu_verify_connection();
+  HAL_TIM_Base_Start_IT(&htim1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -225,7 +275,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
   hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;
   hspi1.Init.NSS = SPI_NSS_HARD_OUTPUT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8; // From 8
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -261,9 +311,9 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 1000-1;
+  htim1.Init.Prescaler = 10000-1; // From 1000-1
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 127;
+  htim1.Init.Period = 2000;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
