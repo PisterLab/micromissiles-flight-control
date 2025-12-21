@@ -36,19 +36,30 @@ typedef enum {
   FIFO_CONFIG1 = 0x5F,
   FIFO_CONFIG2 = 0x60,
   FIFO_CONFIG3 = 0x61,
-} register_e;
+  WHO_AM_I = 0x75,
+} spi_register_e;
 
 typedef enum {
   BYPASS = 0,
   STREAM_TO_FIFO = 1,
   STOP_ON_FULL = 2,
 } fifo_mode_e;
+
+typedef enum {
+  BANK_1 = 0x08000000,
+  BANK_2 = 0x08040000,
+} flash_memory_address_e;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define SPI_TIMEOUT 10
+#define SPI_MAX_PACKET_SIZE 64
 #define IMU_PACKET_SIZE 16
-#define SPI_PACKET_SIZE (IMU_PACKET_SIZE + 1)
+#define IMU_SPI_PACKET_SIZE (IMU_PACKET_SIZE + 1)
+#define IMU_DEFAULT_WHO_AM_I 0x42
+#define FLASH_BANK_SIZE (256 * 1024)
+#define FLASH_SIZE (2 * FLASH_BANK_SIZE)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -64,8 +75,9 @@ DMA_HandleTypeDef hdma_spi1_rx;
 TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN PV */
-uint8_t g_spi_tx_buffer[SPI_PACKET_SIZE];
-uint8_t g_spi_rx_buffer[SPI_PACKET_SIZE];
+uint8_t g_spi_tx_buffer[SPI_MAX_PACKET_SIZE];
+uint8_t g_spi_rx_buffer[SPI_MAX_PACKET_SIZE];
+uint8_t g_imu_buffer[IMU_PACKET_SIZE];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -98,41 +110,44 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
   if (htim->Instance == TIM1) {
     led_activity_toggle();
     if (hspi1.State == HAL_SPI_STATE_READY) {
-        HAL_SPI_TransmitReceive_DMA(&hspi1, g_spi_tx_buffer, g_spi_rx_buffer, SPI_PACKET_SIZE);
+        imu_read();
+        // Data should be in g_imu_buffer now.
     } else {
         led_error_on();
     }
   }
 }
 
-static void imu_write(uint8_t address, uint8_t data) {
-  uint8_t write_address = address & 0x7F;
-  uint8_t write_buffer[2] = {write_address, data};
-  HAL_SPI_Transmit(&hspi1, write_buffer, 2 * sizeof(uint8_t), /*Timeout=*/10);
+static void spi_write(spi_register_e address, uint8_t data) {
+  g_spi_tx_buffer[0] = address & 0x7F;
+  g_spi_tx_buffer[1] = data;
+  HAL_SPI_Transmit(&hspi1, g_spi_tx_buffer, 2, SPI_TIMEOUT);
 }
 
-static void imu_read(uint8_t address, uint8_t* buffer) {
-  uint8_t read_address = 0x80 | address;
-  uint8_t write_buffer[SPI_PACKET_SIZE] = {0};
-  write_buffer[0] = read_address;
-  uint8_t read_buffer[SPI_PACKET_SIZE] = {0};
-  HAL_SPI_TransmitReceive(&hspi1, write_buffer, read_buffer, SPI_PACKET_SIZE, /*Timeout=*/10);
+static void spi_read(spi_register_e address, size_t length) {
+  if (length > SPI_MAX_PACKET_SIZE) {
+    return;
+  }
+  g_spi_tx_buffer[0] = address | 0x80;
+  HAL_SPI_TransmitReceive(&hspi1, g_spi_tx_buffer, g_spi_rx_buffer, length, SPI_TIMEOUT);
+}
+
+static void imu_read(void) {
+  spi_read(FIFO_DATA, IMU_SPI_PACKET_SIZE);
   // Ignore the SPI address byte.
-  memcpy(buffer, read_buffer + 1, IMU_PACKET_SIZE);
+  memcpy(g_imu_buffer, g_spi_rx_buffer + 1, IMU_PACKET_SIZE);
 }
 
 static void imu_init(void) {
   // Enable stream-to-FIFO mode.
-  imu_write(FIFO_CONFIG, 1 << 6);
+  spi_write(FIFO_CONFIG, 1 << 6);
   // Enable temperature, gyroscope, and accelomerater data.
-  imu_write(FIFO_CONFIG1, 0x07);
+  spi_write(FIFO_CONFIG1, 0x07);
 }
 
-static void imu_verify_connection(void) {
-  uint8_t address = 0x0F;
-  uint8_t read_buffer[IMU_PACKET_SIZE] = {0};
-  imu_read(address, read_buffer);
-  if (read_buffer[0] == 0x69) {
+static void imu_verify(void) {
+  spi_read(WHO_AM_I, /*length=*/1);
+  if (g_spi_rx_buffer[0] == IMU_DEFAULT_WHO_AM_I) {
       led_success_on();
   } else {
       led_error_on();
