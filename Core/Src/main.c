@@ -21,12 +21,27 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdint.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+typedef enum {
+  SENSOR_CONFIG0 = 0x03,
+  FIFO_CONFIG = 0x16,
+  FIFO_COUNTH = 0x2E,
+  FIFO_COUNTL = 0x2F,
+  FIFO_DATA = 0x30,
+  FIFO_CONFIG1 = 0x5F,
+  FIFO_CONFIG2 = 0x60,
+  FIFO_CONFIG3 = 0x61,
+} register_e;
 
+typedef enum {
+  BYPASS = 0,
+  STREAM_TO_FIFO = 1,
+  STOP_ON_FULL = 2,
+} fifo_mode_e;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -41,10 +56,10 @@
 
 /* Private variables ---------------------------------------------------------*/
 SPI_HandleTypeDef hspi1;
+DMA_HandleTypeDef hdma_spi1_tx;
 DMA_HandleTypeDef hdma_spi1_rx;
 
 TIM_HandleTypeDef htim1;
-DMA_HandleTypeDef hdma_tim1_up;
 
 /* USER CODE BEGIN PV */
 
@@ -62,7 +77,35 @@ static void MX_TIM1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+  if (htim->Instance == TIM1) {
+    HAL_SPI_TransmitReceive_DMA(&hspi1, aTxBuffer, aRxBuffer, BUFFER_SIZE);
+  }
+}
 
+static void imu_write(uint8_t address, uint8_t data) {
+  uint8_t write_address = address & 0x7F;
+  uint8_t write_buffer[2] = {write_address, data};
+  HAL_SPI_Transmit_DMA(&hspi1, write_buffer, sizeof(uint8_t) * 2);
+}
+
+static void imu_read(uint8_t address, uint8_t* buffer) {
+  uint8_t read_address = 0x80 | address;
+  uint8_t write_buffer[17];
+  write_buffer[0] = read_address;
+  uint8_t read_buffer[17];
+  memset(read_buffer, 0, sizeof(uint8_t) * 17);
+  HAL_SPI_TransmitReceive_DMA(&hspi1, write_buffer, read_buffer, sizeof(uint8_t) * 17);
+  // Ignore the SPI address byte.
+  memcpy(buffer, read_buffer + 1, sizeof(uint8_t) * 16);
+}
+
+static void imu_init() {
+  // Enable stream-to-FIFO mode.
+  imu_write(FIFO_CONFIG, 1 << 6);
+  // Enable temperature, gyroscope, and accelomerater data.
+  imu_write(FIFO_CONFIG1, 0x07);
+}
 /* USER CODE END 0 */
 
 /**
@@ -98,7 +141,8 @@ int main(void)
   MX_SPI1_Init();
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-
+  HAL_TIM_Base_Start_IT(&htim1);
+  imu_init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -232,9 +276,9 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
   sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_ENABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
@@ -262,6 +306,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel2_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+  /* DMAMUX_OVR_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMAMUX_OVR_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMAMUX_OVR_IRQn);
 
 }
 
