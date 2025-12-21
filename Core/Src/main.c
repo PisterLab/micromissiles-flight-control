@@ -47,14 +47,13 @@ typedef enum {
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define IMU_PACKET_SIZE 16
+#define SPI_PACKET_SIZE (IMU_PACKET_SIZE + 1)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#define LED_SUCCESS_ON() HAL_GPIO_WritePin(GPIOB, LED1_SIG_Pin, GPIO_PIN_SET)
-#define LED_ACTIVITY_TOGGLE() HAL_GPIO_TogglePin(GPIOB, LED2_SIG_Pin)
-#define LED_ERROR_ON() HAL_GPIO_WritePin(GPIOA, LED3_SIG_Pin, GPIO_PIN_SET)
+
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -65,9 +64,8 @@ DMA_HandleTypeDef hdma_spi1_rx;
 TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN PV */
-#define BUFFER_SIZE 17
-uint8_t aTxBuffer[BUFFER_SIZE];
-uint8_t aRxBuffer[BUFFER_SIZE];
+uint8_t g_spi_tx_buffer[SPI_PACKET_SIZE];
+uint8_t g_spi_rx_buffer[SPI_PACKET_SIZE];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -77,39 +75,32 @@ static void MX_DMA_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
+static void led_success_on(void) {
+  HAL_GPIO_WritePin(GPIOB, LED1_SIG_Pin, GPIO_PIN_SET);
+}
 
+static void led_activity_toggle(void) {
+  HAL_GPIO_TogglePin(GPIOB, LED2_SIG_Pin);
+}
+
+static void led_error_on(void) {
+  HAL_GPIO_WritePin(GPIOA, LED3_SIG_Pin, GPIO_PIN_SET);
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-//void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-//  if (htim->Instance == TIM1) {
-//	  if (hspi1.State == HAL_SPI_STATE_READY) {
-//		  HAL_SPI_TransmitReceive_DMA(&hspi1, aTxBuffer, aRxBuffer, BUFFER_SIZE);
-//	  }
-//  }
-//}
-void TIM1_UP_TIM16_IRQHandler(void)
-{
-  /* USER CODE BEGIN TIM1_UP_TIM16_IRQn 0 */
-
-  /* USER CODE END TIM1_UP_TIM16_IRQn 0 */
-
-  // This function clears the interrupt flag and calls your PeriodElapsedCallback
+void TIM1_UP_TIM16_IRQHandler(void) {
   HAL_TIM_IRQHandler(&htim1);
-
-  /* USER CODE BEGIN TIM1_UP_TIM16_IRQn 1 */
-
-  /* USER CODE END TIM1_UP_TIM16_IRQn 1 */
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
   if (htim->Instance == TIM1) {
-    LED_ACTIVITY_TOGGLE();
+    led_activity_toggle();
     if (hspi1.State == HAL_SPI_STATE_READY) {
-        HAL_SPI_TransmitReceive_DMA(&hspi1, aTxBuffer, aRxBuffer, BUFFER_SIZE);
+        HAL_SPI_TransmitReceive_DMA(&hspi1, g_spi_tx_buffer, g_spi_rx_buffer, SPI_PACKET_SIZE);
     } else {
-        LED_ERROR_ON();
+        led_error_on();
     }
   }
 }
@@ -117,41 +108,34 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 static void imu_write(uint8_t address, uint8_t data) {
   uint8_t write_address = address & 0x7F;
   uint8_t write_buffer[2] = {write_address, data};
-  HAL_SPI_Transmit(&hspi1, write_buffer, 2, 10);
-//  HAL_SPI_Transmit_DMA(&hspi1, write_buffer, sizeof(uint8_t) * 2);
+  HAL_SPI_Transmit(&hspi1, write_buffer, 2 * sizeof(uint8_t), /*Timeout=*/10);
 }
 
 static void imu_read(uint8_t address, uint8_t* buffer) {
   uint8_t read_address = 0x80 | address;
-  uint8_t write_buffer[17] = {0}; //  uint8_t write_buffer[17];
+  uint8_t write_buffer[SPI_PACKET_SIZE] = {0};
   write_buffer[0] = read_address;
-  uint8_t read_buffer[17] = {0}; //  uint8_t read_buffer[17];
-//  memset(read_buffer, 0, sizeof(uint8_t) * 17);
-//  HAL_SPI_TransmitReceive_DMA(&hspi1, write_buffer, read_buffer, sizeof(uint8_t) * 17);
-  HAL_SPI_TransmitReceive(&hspi1, write_buffer, read_buffer, 17, 10);
+  uint8_t read_buffer[SPI_PACKET_SIZE] = {0};
+  HAL_SPI_TransmitReceive(&hspi1, write_buffer, read_buffer, SPI_PACKET_SIZE, /*Timeout=*/10);
   // Ignore the SPI address byte.
-  memcpy(buffer, read_buffer + 1, 16); //  memcpy(buffer, read_buffer + 1, sizeof(uint8_t) * 16);
+  memcpy(buffer, read_buffer + 1, IMU_PACKET_SIZE);
 }
 
-static void imu_init() {
+static void imu_init(void) {
   // Enable stream-to-FIFO mode.
-  aTxBuffer[0] = 0x80 | 0x30;
   imu_write(FIFO_CONFIG, 1 << 6);
   // Enable temperature, gyroscope, and accelomerater data.
   imu_write(FIFO_CONFIG1, 0x07);
 }
 
-static void imu_verify_connection() {
-  uint8_t who_am_i_reg = 0x0F;
-  uint8_t temp_buffer[16] = {0};
-//  uint8_t device_id = 0;
-
-  imu_read(who_am_i_reg, temp_buffer);
-
-  if (temp_buffer[0] == 0x69) {
-      LED_SUCCESS_ON(); // LED1 turns SOLID to indicate hardware link is good
+static void imu_verify_connection(void) {
+  uint8_t address = 0x0F;
+  uint8_t read_buffer[IMU_PACKET_SIZE] = {0};
+  imu_read(address, read_buffer);
+  if (read_buffer[0] == 0x69) {
+      led_success_on();
   } else {
-      LED_ERROR_ON();   // LED3 turns SOLID to indicate verification failed
+      led_error_on();
   }
 }
 /* USER CODE END 0 */
