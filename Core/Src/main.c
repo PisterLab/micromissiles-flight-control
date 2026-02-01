@@ -23,31 +23,70 @@
 /* USER CODE BEGIN Includes */
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 typedef enum {
-  REGISTER_SENSOR_CONFIG0 = 0x03,
+  REGISTER_SENSOR_CONFIG0 = 0x03, // These five are from Titan
   REGISTER_FIFO_CONFIG = 0x16,
   REGISTER_FIFO_COUNTH = 0x2E,
   REGISTER_FIFO_COUNTL = 0x2F,
   REGISTER_FIFO_DATA = 0x30,
-  REGISTER_FIFO_CONFIG1 = 0x5F,
+
+  REGISTER_IMU_READINGS = 0x1D, // Starts at TEMP_DATA1, read the next 16 bytes to 0x2C (TMST_FSYNCL)
+//
+//  REGISTER_TEMP_DATA1 = 0x1D,
+//  REGISTER_TEMP_DATA0 = 0x1E,
+//  REGISTER_ACCEL_DATA_X1 = 0x1F, // Accel data from 0x1F to 0x24 (X->Y->Z), gyro data from 0x25 to 0x2A (X->Y->Z)
+//  	  	  	  	  	  	  	  	 // 0x1F contains bits [15:8], 0x20 contains bits [7:0]
+//  REGISTER_TMST_FSYNCH = 0x2B,
+//  REGISTER_TMST_FSYNCL = 0x2C,
+
+  REGISTER_PWR_MGMT0 = 0x4E,
+  REGISTER_ACCEL_CONFIG0 = 0x50,
+
+  REGISTER_FIFO_CONFIG1 = 0x5F, // These four are from Titan
   REGISTER_FIFO_CONFIG2 = 0x60,
   REGISTER_FIFO_CONFIG3 = 0x61,
   REGISTER_WHO_AM_I = 0x75,
+
+  REGISTER_BANK_SEL = 0x76, // 000 for 0, 001 for 1, 010 for 2, 011 for 3, and 100 for 4
 } imu_register_e;
+
+
+typedef struct {
+  uint8_t reserved;
+  int8_t temperature_1;
+  int8_t temperature_0;
+  int8_t accel_x1;
+  int8_t accel_x0;
+  int8_t accel_y1;
+  int8_t accel_y0;
+  int8_t accel_z1;
+  int8_t accel_z0;
+  int8_t gyro_x1;
+  int8_t gyro_x0;
+  int8_t gyro_y1;
+  int8_t gyro_y0;
+  int8_t gyro_z1;
+  int8_t gyro_z0;
+  int8_t timestamp_1;
+  int8_t timestamp_0;
+} imu_packet_t;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define SPI_TIMEOUT 10
 #define SPI_MAX_PACKET_SIZE 64
-#define IMU_PACKET_SIZE 16
+#define IMU_PACKET_SIZE 16 // 2B temperature, 6B X->Y->Z accel, 6B X->Y->Z gyro, 2B timestamp
 #define IMU_SPI_PACKET_SIZE (IMU_PACKET_SIZE + 1)
 #define IMU_DEFAULT_WHO_AM_I 0x42
-#define IMU_FLASH_SIZE (126 * 1024)
+//#define IMU_FLASH_SIZE (126 * 1024)
+#define ACCEL_THRESHOLD_RAW 3000
+#define GYRO_THRESHOLD_RAW 90
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -65,10 +104,10 @@ TIM_HandleTypeDef htim1;
 /* USER CODE BEGIN PV */
 uint8_t g_spi_tx_buffer[SPI_MAX_PACKET_SIZE];
 uint8_t g_spi_rx_buffer[SPI_MAX_PACKET_SIZE];
-uint8_t g_imu_buffer[IMU_PACKET_SIZE];
+//uint8_t g_imu_buffer[IMU_PACKET_SIZE];
 
-uint8_t g_imu_flash_buffer[IMU_FLASH_SIZE] __attribute__((section(".imu")));
-size_t g_imu_flash_num_bytes_written = 0;
+//uint8_t g_imu_flash_buffer[IMU_FLASH_SIZE] __attribute__((section(".imu")));
+//size_t g_imu_flash_num_bytes_written = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -78,54 +117,94 @@ static void MX_DMA_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
+
 static void led_success_on(void) {
-  HAL_GPIO_WritePin(GPIOB, LED1_SIG_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOA, LED1_SIG_Pin, GPIO_PIN_SET);
 }
+static void led_success_off(void) {
+  HAL_GPIO_WritePin(GPIOA, LED1_SIG_Pin, GPIO_PIN_RESET);
+}
+
+
+static void led_2_on(void) {
+  HAL_GPIO_WritePin(GPIOB, LED2_SIG_Pin, GPIO_PIN_SET);
+}
+static void led_2_off(void) {
+  HAL_GPIO_WritePin(GPIOB, LED2_SIG_Pin, GPIO_PIN_RESET);
+}
+
+
+static void led_error_on(void) {
+  HAL_GPIO_WritePin(GPIOB, LED3_SIG_Pin, GPIO_PIN_SET);
+}
+static void led_error_off(void) {
+  HAL_GPIO_WritePin(GPIOB, LED3_SIG_Pin, GPIO_PIN_RESET);
+}
+
 
 static void led_activity_toggle(void) {
   HAL_GPIO_TogglePin(GPIOB, LED2_SIG_Pin);
 }
 
-static void led_error_on(void) {
-  HAL_GPIO_WritePin(GPIOA, LED3_SIG_Pin, GPIO_PIN_SET);
-}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void cs_select(void) {
+	HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_RESET);
+}
+static void cs_deselect(void) {
+	HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET);
+}
+
+
 static void spi_write(imu_register_e address, uint8_t data) {
+  cs_select();
   g_spi_tx_buffer[0] = address & 0x7F;
   g_spi_tx_buffer[1] = data;
   HAL_SPI_Transmit(&hspi1, g_spi_tx_buffer, 2, SPI_TIMEOUT);
+  cs_deselect();
 }
 
 static void spi_read(imu_register_e address, size_t length) {
-  if (length > SPI_MAX_PACKET_SIZE) {
-    return;
-  }
+//  if (length > SPI_MAX_PACKET_SIZE) {
+//    return;
+//  }
+  cs_select();
   g_spi_tx_buffer[0] = address | 0x80;
   HAL_SPI_TransmitReceive(&hspi1, g_spi_tx_buffer, g_spi_rx_buffer, length, SPI_TIMEOUT);
+  cs_deselect();
 }
 
-static void imu_read(void) {
-  spi_read(REGISTER_FIFO_DATA, IMU_SPI_PACKET_SIZE);
-  // Ignore the SPI address byte.
-  memcpy(g_imu_buffer, g_spi_rx_buffer + 1, IMU_PACKET_SIZE);
-}
+//static void imu_read(void) {
+//  spi_read(REGISTER_FIFO_DATA, IMU_SPI_PACKET_SIZE);
+//  // Ignore the SPI address byte.
+//  memcpy(g_imu_buffer, g_spi_rx_buffer + 1, IMU_PACKET_SIZE);
+//}
 
 static void imu_init(void) {
-  // Enable stream-to-FIFO mode.
-  spi_write(REGISTER_FIFO_CONFIG, 1 << 6);
-  // Enable temperature, gyroscope, and accelomerater data.
-  spi_write(REGISTER_FIFO_CONFIG1, 0x07);
+  spi_write(REGISTER_BANK_SEL, 0x00);
+  HAL_Delay(50);
+//  // Enable stream-to-FIFO mode.
+//  spi_write(REGISTER_FIFO_CONFIG, 1 << 6);
+//  // Enable temperature, gyroscope, and accelomerater data.
+//  spi_write(REGISTER_FIFO_CONFIG1, 0x07);
+  spi_write(REGISTER_PWR_MGMT0, 0x0F);
+  HAL_Delay(50);
+  spi_write(REGISTER_ACCEL_CONFIG0, 0x06);
+  HAL_Delay(10);
 }
 
 static void imu_verify(void) {
-  spi_read(REGISTER_WHO_AM_I, /*length=*/1);
-  if (g_spi_rx_buffer[0] == IMU_DEFAULT_WHO_AM_I) {
+  spi_read(REGISTER_WHO_AM_I, /*length=*/2); //was 1, then 2, back to 1
+  if (g_spi_rx_buffer[1] == IMU_DEFAULT_WHO_AM_I) {//was 0
       led_success_on();
+      HAL_Delay(1000);
+      led_success_off();
   } else {
       led_error_on();
+      HAL_Delay(1000);
+      led_error_off();
   }
 }
 
@@ -133,20 +212,87 @@ void TIM1_UP_TIM16_IRQHandler(void) {
   HAL_TIM_IRQHandler(&htim1);
 }
 
+void temperature_check(int16_t detected_temperature) {
+	int16_t celsius = 25 + (detected_temperature / 132.48);
+	if (celsius > 1) { // Another option is celsius < 100 (both should obviously return true)
+		led_success_on();
+		HAL_Delay(1000);
+		led_success_off();
+	} else {
+		led_error_on();
+		HAL_Delay(1000);
+		led_error_off();
+	}
+}
+
+
+void accel_visualization(int16_t accelX, int16_t accelY, int16_t accelZ) {
+	if (abs(accelX) > ACCEL_THRESHOLD_RAW) {
+    	led_success_on();
+    } else {
+    	led_success_off();
+    }
+
+
+    if (abs(accelY) > ACCEL_THRESHOLD_RAW) {
+    	led_2_on();
+    } else {
+    	led_2_off();
+    }
+
+
+    if (abs(accelZ) > ACCEL_THRESHOLD_RAW) {
+    	led_error_on();
+    } else {
+    	led_error_off();
+    }
+}
+
+
+void gyro_visualization(int16_t gyroX, int16_t gyroY, int16_t gyroZ) {
+
+	if (abs(gyroX) > GYRO_THRESHOLD_RAW) {
+    	led_success_on();
+    } else {
+    	led_success_off();
+    }
+
+
+    if (abs(gyroY) > GYRO_THRESHOLD_RAW) {
+    	led_2_on();
+    } else {
+    	led_2_off();
+    }
+
+
+    if (abs(gyroZ) > GYRO_THRESHOLD_RAW) {
+    	led_error_on();
+    } else {
+    	led_error_off();
+    }
+}
+
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
   if (htim->Instance == TIM1) {
-    led_activity_toggle();
+
     if (hspi1.State == HAL_SPI_STATE_READY) {
-        imu_read();
-        // Copy the IMU data into flash memory.
-        if (g_imu_flash_num_bytes_written < IMU_FLASH_SIZE) {
-          HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, (uint32_t)(g_imu_flash_buffer + g_imu_flash_num_bytes_written), *((uint64_t*)g_imu_buffer));
-          HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, (uint32_t)(g_imu_flash_buffer + g_imu_flash_num_bytes_written + sizeof(uint64_t)), *((uint64_t*)(g_imu_buffer + sizeof(uint64_t))));
-          g_imu_flash_num_bytes_written += IMU_PACKET_SIZE;
-        }
-    } else {
-        led_error_on();
+    	spi_read(REGISTER_IMU_READINGS, IMU_SPI_PACKET_SIZE);
+    	imu_packet_t* packet = (imu_packet_t*)g_spi_rx_buffer;
+    	int16_t temperature = ((int16_t)(packet->temperature_1) << 8) | packet->temperature_0;
+    	int16_t accel_x = ((int16_t)(packet->accel_x1) << 8) | packet->accel_x0;
+    	int16_t accel_y = ((int16_t)(packet->accel_y1) << 8) | packet->accel_y0;
+    	int16_t accel_z = ((int16_t)(packet->accel_z1) << 8) | packet->accel_z0;
+    	int16_t gyro_x = ((int16_t)(packet->gyro_x1) << 8) | packet->gyro_x0;
+    	int16_t gyro_y = ((int16_t)(packet->gyro_y1) << 8) | packet->gyro_y0;
+    	int16_t gyro_z = ((int16_t)(packet->gyro_z1) << 8) | packet->gyro_z0;
+    	int16_t timestamp = ((int16_t)(packet->timestamp_1) << 8) | packet->timestamp_0;
+
+    	// temperature_check(temperature);
+    	accel_visualization(accel_x, accel_y, accel_z);
+        // gyro_visualization(gyro_x, gyro_y, gyro_z);
     }
+    //led_activity_toggle();
   }
 }
 /* USER CODE END 0 */
@@ -173,7 +319,7 @@ int main(void)
 
   /* Configure the system clock */
   SystemClock_Config();
-  __HAL_RCC_TIM1_CLK_ENABLE();
+
   /* USER CODE BEGIN SysInit */
 
   /* USER CODE END SysInit */
@@ -186,6 +332,14 @@ int main(void)
   /* USER CODE BEGIN 2 */
   HAL_NVIC_EnableIRQ(TIM1_UP_TIM16_IRQn);
   imu_init();
+  HAL_Delay(2000);
+  led_success_on();
+  HAL_Delay(500);
+  led_success_off();
+  led_error_on();
+  HAL_Delay(500);
+  led_error_off();
+  HAL_Delay(500);
   imu_verify();
   HAL_TIM_Base_Start_IT(&htim1);
   /* USER CODE END 2 */
@@ -269,8 +423,8 @@ static void MX_SPI1_Init(void)
   hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
   hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;
-  hspi1.Init.NSS = SPI_NSS_HARD_OUTPUT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8; // From 8
+  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -306,9 +460,9 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 10000-1; // From 1000-1
+  htim1.Init.Prescaler = 1000-1;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 2000;
+  htim1.Init.Period = 127;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
@@ -377,12 +531,15 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, MODE_0X_Pin|ENABLE_DRIVERS_Pin|MODE_1X_Pin|STEP2_U1_Pin
-                          |DIR2_U2_Pin|DIR2_U1_Pin|STEP2_U2_Pin|DIR2_U1A7_Pin
-                          |LED3_SIG_Pin, GPIO_PIN_RESET);
+                          |DIR2_U2_Pin|DIR1_U2_Pin|STEP2_U2_Pin|DIR2_U1_Pin
+                          |LED1_SIG_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, DIR1_U1_Pin|STEP1_U1_Pin|STEP1_U2_Pin|LED1_SIG_Pin
+  HAL_GPIO_WritePin(GPIOB, DIR1_U1_Pin|STEP1_U1_Pin|STEP1_U2_Pin|LED3_SIG_Pin
                           |LED2_SIG_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pins : USER_TOUCH0_Pin USER_TOUCH1_Pin */
   GPIO_InitStruct.Pin = USER_TOUCH0_Pin|USER_TOUCH1_Pin;
@@ -397,24 +554,31 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(NRST_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : MODE_0X_Pin ENABLE_DRIVERS_Pin MODE_1X_Pin STEP2_U1_Pin
-                           DIR2_U2_Pin DIR2_U1_Pin STEP2_U2_Pin DIR2_U1A7_Pin
-                           LED3_SIG_Pin */
+                           DIR2_U2_Pin DIR1_U2_Pin STEP2_U2_Pin DIR2_U1_Pin
+                           LED1_SIG_Pin */
   GPIO_InitStruct.Pin = MODE_0X_Pin|ENABLE_DRIVERS_Pin|MODE_1X_Pin|STEP2_U1_Pin
-                          |DIR2_U2_Pin|DIR2_U1_Pin|STEP2_U2_Pin|DIR2_U1A7_Pin
-                          |LED3_SIG_Pin;
+                          |DIR2_U2_Pin|DIR1_U2_Pin|STEP2_U2_Pin|DIR2_U1_Pin
+                          |LED1_SIG_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : DIR1_U1_Pin STEP1_U1_Pin STEP1_U2_Pin LED1_SIG_Pin
+  /*Configure GPIO pins : DIR1_U1_Pin STEP1_U1_Pin STEP1_U2_Pin LED3_SIG_Pin
                            LED2_SIG_Pin */
-  GPIO_InitStruct.Pin = DIR1_U1_Pin|STEP1_U1_Pin|STEP1_U2_Pin|LED1_SIG_Pin
+  GPIO_InitStruct.Pin = DIR1_U1_Pin|STEP1_U1_Pin|STEP1_U2_Pin|LED3_SIG_Pin
                           |LED2_SIG_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : SPI1_CS_Pin */
+  GPIO_InitStruct.Pin = SPI1_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(SPI1_CS_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 

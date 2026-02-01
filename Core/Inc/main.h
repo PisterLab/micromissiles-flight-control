@@ -73,24 +73,26 @@ void Error_Handler(void);
 #define STEP2_U1_GPIO_Port GPIOA
 #define DIR2_U2_Pin GPIO_PIN_4
 #define DIR2_U2_GPIO_Port GPIOA
-#define DIR2_U1_Pin GPIO_PIN_5
-#define DIR2_U1_GPIO_Port GPIOA
+#define DIR1_U2_Pin GPIO_PIN_5
+#define DIR1_U2_GPIO_Port GPIOA
 #define STEP2_U2_Pin GPIO_PIN_6
 #define STEP2_U2_GPIO_Port GPIOA
-#define DIR2_U1A7_Pin GPIO_PIN_7
-#define DIR2_U1A7_GPIO_Port GPIOA
+#define DIR2_U1_Pin GPIO_PIN_7
+#define DIR2_U1_GPIO_Port GPIOA
 #define DIR1_U1_Pin GPIO_PIN_0
 #define DIR1_U1_GPIO_Port GPIOB
 #define STEP1_U1_Pin GPIO_PIN_1
 #define STEP1_U1_GPIO_Port GPIOB
 #define STEP1_U2_Pin GPIO_PIN_2
 #define STEP1_U2_GPIO_Port GPIOB
-#define LED1_SIG_Pin GPIO_PIN_11
-#define LED1_SIG_GPIO_Port GPIOB
+#define LED3_SIG_Pin GPIO_PIN_11
+#define LED3_SIG_GPIO_Port GPIOB
 #define LED2_SIG_Pin GPIO_PIN_14
 #define LED2_SIG_GPIO_Port GPIOB
-#define LED3_SIG_Pin GPIO_PIN_9
-#define LED3_SIG_GPIO_Port GPIOA
+#define LED1_SIG_Pin GPIO_PIN_9
+#define LED1_SIG_GPIO_Port GPIOA
+#define SPI1_CS_Pin GPIO_PIN_15
+#define SPI1_CS_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 
