@@ -57,16 +57,14 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define USER_TOUCH0_Pin GPIO_PIN_13
-#define USER_TOUCH0_GPIO_Port GPIOC
-#define USER_TOUCH1_Pin GPIO_PIN_14
-#define USER_TOUCH1_GPIO_Port GPIOC
+#define VIN_SENSE_Pin GPIO_PIN_0
+#define VIN_SENSE_GPIO_Port GPIOF
 #define NRST_Pin GPIO_PIN_10
 #define NRST_GPIO_Port GPIOG
-#define MODE_0X_Pin GPIO_PIN_0
-#define MODE_0X_GPIO_Port GPIOA
-#define ENABLE_DRIVERS_Pin GPIO_PIN_1
-#define ENABLE_DRIVERS_GPIO_Port GPIOA
+#define FAULT1_U1_Pin GPIO_PIN_0
+#define FAULT1_U1_GPIO_Port GPIOA
+#define FAULT2_U1_Pin GPIO_PIN_1
+#define FAULT2_U1_GPIO_Port GPIOA
 #define MODE_1X_Pin GPIO_PIN_2
 #define MODE_1X_GPIO_Port GPIOA
 #define STEP2_U1_Pin GPIO_PIN_3
@@ -85,12 +83,24 @@ void Error_Handler(void);
 #define STEP1_U1_GPIO_Port GPIOB
 #define STEP1_U2_Pin GPIO_PIN_2
 #define STEP1_U2_GPIO_Port GPIOB
-#define LED3_SIG_Pin GPIO_PIN_11
-#define LED3_SIG_GPIO_Port GPIOB
-#define LED2_SIG_Pin GPIO_PIN_14
-#define LED2_SIG_GPIO_Port GPIOB
-#define LED1_SIG_Pin GPIO_PIN_9
-#define LED1_SIG_GPIO_Port GPIOA
+#define MAGNET_DETECT_Pin GPIO_PIN_11
+#define MAGNET_DETECT_GPIO_Port GPIOB
+#define MODE_0X_Pin GPIO_PIN_12
+#define MODE_0X_GPIO_Port GPIOB
+#define FAULT2_U2_Pin GPIO_PIN_13
+#define FAULT2_U2_GPIO_Port GPIOB
+#define FAULT1_U2_Pin GPIO_PIN_14
+#define FAULT1_U2_GPIO_Port GPIOB
+#define ENABLE_DRIVERS_Pin GPIO_PIN_15
+#define ENABLE_DRIVERS_GPIO_Port GPIOB
+#define USART1_TX_Pin GPIO_PIN_9
+#define USART1_TX_GPIO_Port GPIOA
+#define USART1_RX_Pin GPIO_PIN_10
+#define USART1_RX_GPIO_Port GPIOA
+#define RED_LED_Pin GPIO_PIN_11
+#define RED_LED_GPIO_Port GPIOA
+#define BRIGHT_LED_Pin GPIO_PIN_12
+#define BRIGHT_LED_GPIO_Port GPIOA
 #define SPI1_CS_Pin GPIO_PIN_15
 #define SPI1_CS_GPIO_Port GPIOA
 
