@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 /* USER CODE END Includes */
 
@@ -60,24 +61,44 @@ typedef enum {
 } imu_register_e;
 
 
+//typedef struct {
+//  uint8_t reserved;
+//  int8_t temperature_1;
+//  int8_t temperature_0;
+//  int8_t accel_x1;
+//  int8_t accel_x0;
+//  int8_t accel_y1;
+//  int8_t accel_y0;
+//  int8_t accel_z1;
+//  int8_t accel_z0;
+//  int8_t gyro_x1;
+//  int8_t gyro_x0;
+//  int8_t gyro_y1;
+//  int8_t gyro_y0;
+//  int8_t gyro_z1;
+//  int8_t gyro_z0;
+//  int8_t timestamp_1;
+//  int8_t timestamp_0;
+//} imu_packet_t;
+
 typedef struct {
   uint8_t reserved;
-  int8_t temperature_1;
-  int8_t temperature_0;
-  int8_t accel_x1;
-  int8_t accel_x0;
-  int8_t accel_y1;
-  int8_t accel_y0;
-  int8_t accel_z1;
-  int8_t accel_z0;
-  int8_t gyro_x1;
-  int8_t gyro_x0;
-  int8_t gyro_y1;
-  int8_t gyro_y0;
-  int8_t gyro_z1;
-  int8_t gyro_z0;
-  int8_t timestamp_1;
-  int8_t timestamp_0;
+  uint8_t temperature_1;
+  uint8_t temperature_0;
+  uint8_t accel_x1;
+  uint8_t accel_x0;
+  uint8_t accel_y1;
+  uint8_t accel_y0;
+  uint8_t accel_z1;
+  uint8_t accel_z0;
+  uint8_t gyro_x1;
+  uint8_t gyro_x0;
+  uint8_t gyro_y1;
+  uint8_t gyro_y0;
+  uint8_t gyro_z1;
+  uint8_t gyro_z0;
+  uint8_t timestamp_1;
+  uint8_t timestamp_0;
 } imu_packet_t;
 /* USER CODE END PTD */
 
@@ -107,6 +128,8 @@ DMA_HandleTypeDef hdma_spi1_rx;
 
 TIM_HandleTypeDef htim1;
 
+UART_HandleTypeDef huart1;
+
 /* USER CODE BEGIN PV */
 uint8_t g_spi_tx_buffer[SPI_MAX_PACKET_SIZE];
 uint8_t g_spi_rx_buffer[SPI_MAX_PACKET_SIZE];
@@ -117,6 +140,8 @@ uint8_t g_spi_rx_buffer[SPI_MAX_PACKET_SIZE];
 uint32_t current_write_addr = 0x08070000;
 const uint32_t FLASH_END_ADDR = 0x08080000;
 uint32_t last_write_tick = 0;
+uint32_t last_uart_tick = 0;
+char uart_buf[64];
 
 uint32_t last_blink_tick = 0;
 bool led_state = false;
@@ -143,6 +168,7 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_TIM1_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 void MadgwickAHRSupdateIMU(float gx, float gy, float gz, float ax, float ay, float az, float dt);
@@ -275,70 +301,6 @@ void TIM1_UP_TIM16_IRQHandler(void) {
 //}
 
 
-//void accel_visualization(int16_t accelX, int16_t accelY, int16_t accelZ) {
-//	if (abs(accelX) > ACCEL_THRESHOLD_RAW) {
-//    	red_led_on();
-//    } else {
-//    	led_1_off();
-//    }
-//
-//
-//    if (abs(accelY) > ACCEL_THRESHOLD_RAW) {
-//    	red_led_on();
-//    } else {
-//    	led_2_off();
-//    }
-//
-//
-//    if (abs(accelZ) > ACCEL_THRESHOLD_RAW) {
-//    	red_led_on();
-//    } else {
-//    	red_led_off();
-//    }
-//}
-
-
-//void gravity_visualization(int16_t accelX, int16_t accelY, int16_t accelZ) {
-//	if ((fabs(accelX) > (fabs(accelY) + 2000)) && (fabs(accelX) > (fabs(accelZ) + 2000))) {
-//    	led_1_on();
-//    	led_2_off();
-//    	led_3_off();
-//    } else if ((fabs(accelY) > (fabs(accelX) + 2000)) && (fabs(accelY) > (fabs(accelZ) + 2000))) {
-//    	led_1_off();
-//    	led_2_on();
-//    	led_3_off();
-//    } else if ((fabs(accelZ) > (fabs(accelX) + 2000)) && (fabs(accelZ) > (fabs(accelY) + 2000))) {
-//    	led_1_off();
-//    	led_2_off();
-//    	led_3_on();
-//    }
-//}
-
-
-//void gyro_visualization(int16_t gyroX, int16_t gyroY, int16_t gyroZ) {
-//
-//	if (abs(gyroX) > GYRO_THRESHOLD_RAW) {
-//    	led_1_on();
-//    } else {
-//    	led_1_off();
-//    }
-//
-//
-//    if (abs(gyroY) > GYRO_THRESHOLD_RAW) {
-//    	led_2_on();
-//    } else {
-//    	led_2_off();
-//    }
-//
-//
-//    if (abs(gyroZ) > GYRO_THRESHOLD_RAW) {
-//    	led_3_on();
-//    } else {
-//    	led_3_off();
-//    }
-//}
-
-
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
   if (htim->Instance == TIM1) {
 
@@ -381,19 +343,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     	} else {
     		roll_error = 0.0f;
     	}
-
     	// temperature_check(temperature);
-    	// accel_visualization(accel_x, accel_y, accel_z);
-        // gyro_visualization(gyro_x, gyro_y, gyro_z);
-    	// gravity_visualization(accel_x, accel_y, accel_z);
 
-//    	if (HAL_GPIO_ReadPin(USART1_RX_GPIO_Port, USART1_RX_Pin) == GPIO_PIN_SET) {
-//    		magnet_on = true;
-//    	}
-//
-//    	if (HAL_GPIO_ReadPin(USART1_RX_GPIO_Port, USART1_RX_Pin) == GPIO_PIN_SET) {
-//    		magnet_on = false;
-//    	}
 //    	if (magnet_on) {
 //    		if (HAL_GetTick() - last_write_tick >= 10) {
 //    			last_write_tick = HAL_GetTick();
@@ -495,6 +446,8 @@ void MadgwickAHRSupdateIMU(float gx, float gy, float gz, float ax, float ay, flo
     q2 *= recipNorm;
     q3 *= recipNorm;
 }
+
+
 /* USER CODE END 0 */
 
 /**
@@ -529,6 +482,7 @@ int main(void)
   MX_DMA_Init();
   MX_SPI1_Init();
   MX_TIM1_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   HAL_NVIC_EnableIRQ(TIM1_UP_TIM16_IRQn);
   imu_init();
@@ -568,11 +522,11 @@ int main(void)
 
 	        // 4. Handle 1 Hz Blinking (100ms ON, 900ms OFF)
 	        if (magnet_on) {
-	        	if (roll_error > -15.0f && roll_error < 15.0f) {
-	        		red_led_on();
-	        	} else {
-		        	red_led_off();
-	        	}
+//	        	if (roll_error > -15.0f && roll_error < 15.0f) {
+//	        		red_led_on();
+//	        	} else {
+//		        	red_led_off();
+//	        	}
 	        	if (led_state) {
 	        		if (HAL_GetTick() - last_blink_tick >= 100) {
 	        			last_blink_tick = HAL_GetTick();
@@ -586,10 +540,32 @@ int main(void)
 	        			led_state = true;
 	        		}
 	        	}
+	        } else {
+	        	red_led_off();
+	        	led_state = false;
 	        }
 
-	        // 5. Save current state as previous for the next loop iteration
+        	if (HAL_GetTick() - last_uart_tick >= 20) { // Non-blocking delay (20ms = 50Hz)
+        		last_uart_tick = HAL_GetTick();
+
+        		// 1. Bypass the float linker error by extracting whole and fractional parts
+        		bool is_negative = (current_roll < 0.0f);
+        		float abs_roll = is_negative ? -current_roll : current_roll;
+
+        		int whole_part = (int)abs_roll;
+        		int frac_part = (int)((abs_roll - whole_part) * 100.0f); // 2 decimal places
+
+        		// 2. Format the payload into a buffer using standard integer formatting (%d)
+        		char tx_buf[64];
+        		int tx_length = snprintf(tx_buf, sizeof(tx_buf), ">Roll:%s%d.%02d\r\n", is_negative ? "-" : "", whole_part, frac_part);
+
+        		// 3. Begin Tx Transfer (STM32 equivalent of cyhal_uart_write)
+        		HAL_UART_Transmit(&huart1, (uint8_t*)tx_buf, tx_length, 10);
+        	}
+
 	        prev_magnet_on = magnet_on;
+
+
 
 	        // --- Future Stepper Motor Correction Logic Goes Here ---
 	        // if (has_target_orientation) {
@@ -763,6 +739,54 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 115200;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetRxFifoThreshold(&huart1, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -805,8 +829,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, MODE_1X_Pin|STEP2_U1_Pin|DIR2_U2_Pin|DIR1_U2_Pin
-                          |STEP2_U2_Pin|DIR2_U1_Pin|USART1_TX_Pin|RED_LED_Pin
-                          |BRIGHT_LED_Pin, GPIO_PIN_RESET);
+                          |STEP2_U2_Pin|DIR2_U1_Pin|RED_LED_Pin|BRIGHT_LED_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, DIR1_U1_Pin|STEP1_U1_Pin|STEP1_U2_Pin|MODE_0X_Pin
@@ -834,11 +857,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : MODE_1X_Pin STEP2_U1_Pin DIR2_U2_Pin DIR1_U2_Pin
-                           STEP2_U2_Pin DIR2_U1_Pin USART1_TX_Pin RED_LED_Pin
-                           BRIGHT_LED_Pin */
+                           STEP2_U2_Pin DIR2_U1_Pin RED_LED_Pin BRIGHT_LED_Pin */
   GPIO_InitStruct.Pin = MODE_1X_Pin|STEP2_U1_Pin|DIR2_U2_Pin|DIR1_U2_Pin
-                          |STEP2_U2_Pin|DIR2_U1_Pin|USART1_TX_Pin|RED_LED_Pin
-                          |BRIGHT_LED_Pin;
+                          |STEP2_U2_Pin|DIR2_U1_Pin|RED_LED_Pin|BRIGHT_LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -869,12 +890,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(ENABLE_DRIVERS_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : USART1_RX_Pin */
-  GPIO_InitStruct.Pin = USART1_RX_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(USART1_RX_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : SPI1_CS_Pin */
   GPIO_InitStruct.Pin = SPI1_CS_Pin;

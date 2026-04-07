@@ -93,10 +93,6 @@ void Error_Handler(void);
 #define FAULT1_U2_GPIO_Port GPIOB
 #define ENABLE_DRIVERS_Pin GPIO_PIN_15
 #define ENABLE_DRIVERS_GPIO_Port GPIOB
-#define USART1_TX_Pin GPIO_PIN_9
-#define USART1_TX_GPIO_Port GPIOA
-#define USART1_RX_Pin GPIO_PIN_10
-#define USART1_RX_GPIO_Port GPIOA
 #define RED_LED_Pin GPIO_PIN_11
 #define RED_LED_GPIO_Port GPIOA
 #define BRIGHT_LED_Pin GPIO_PIN_12
